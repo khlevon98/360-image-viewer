@@ -1,106 +1,172 @@
-var createSphere = require('primitive-sphere');
-var createControls = require('orbit-controls');
-var createCamera = require('perspective-camera');
-var createRegl = require('regl');
-var createLoop = require('raf-loop');
-var defined = require('defined');
-var assign = require('object-assign');
+import createSphere from "primitive-sphere";
+import createCube from "primitive-cube";
+import createControls from "orbit-controls";
+import createCamera from "perspective-camera";
+import createRegl from "regl";
+import createLoop from "raf-loop";
+import defined from "defined";
+import assign from "object-assign";
 
 // Generate some vertex data for a UV sphere
 // This can be re-used instead of computed each time
-var sphere;
+let sphere;
+let cube;
 
-module.exports = create360Viewer;
-function create360Viewer (opt) {
+function create360Viewer(opt) {
   opt = opt || {};
 
-  var canvas = opt.canvas || document.createElement('canvas');
+  let canvas = opt.canvas || document.createElement("canvas");
 
   if (!sphere) {
-    sphere = createSphere(1, {
+    sphere = createCube(1, {
       segments: 64
     });
   }
 
+  if (!cube) {
+    cube = createCube(1, 1, 1, 3, 3, 3);
+  }
+
   // Create a new regl instance
-  var regl = createRegl({
+  let regl = createRegl({
     canvas: canvas
   });
 
   // Our perspective camera will hold projection/view matrices
-  var camera = createCamera({
-    fov: defined(opt.fov, 45 * Math.PI / 180),
+  let camera = createCamera({
+    fov: defined(opt.fov, (45 * Math.PI) / 180),
     near: 0.1,
     far: 10
-  })
+  });
 
   // The mouse/touch input controls for the orbiting in 360
-  var controls = createControls(assign({}, opt, {
-    element: canvas,
-    parent: window,
-    rotateSpeed: defined(opt.rotateSpeed, 0.75 / (Math.PI * 2)),
-    damping: defined(opt.damping, 0.35),
-    zoom: false,
-    pinch: false,
-    distance: 0
-  }));
+  let controls = createControls(
+    assign({}, opt, {
+      element: canvas,
+      parent: window,
+      rotateSpeed: defined(opt.rotateSpeed, 0.75 / (Math.PI * 2)),
+      damping: defined(opt.damping, 0.35),
+      zoom: false,
+      pinch: false,
+      distance: 0,
+      mode: "sphere"
+    })
+  );
 
   // settings for gl.clear
-  var clearOpts = {
-    color: [ 0, 0, 0, 0 ],
+  let clearOpts = {
+    color: [0, 0, 0, 0],
     depth: 1
   };
 
-  var gl = regl._gl;
-  var destroyed = false;
+  let gl = regl._gl;
+  let destroyed = false;
 
   // allow HTMLImageElement or unspecified image
-  var texture = regl.texture(getTextureParams(opt.image))
+  let texture;
+  let cubeMap;
 
   // We create a new "mesh" that represents our 360 textured sphere
-  var drawMesh = regl({
-    // The uniforms for this shader
-    uniforms: {
-      // Creates a GPU texture from our Image
-      map: texture,
-      // Camera matrices will have to be passed into this mesh
-      projection: regl.prop('projection'),
-      view: regl.prop('view')
-    },
-    // The fragment shader
-    frag: [
-      'precision highp float;',
-      'uniform sampler2D map;',
-      'uniform vec4 color;',
-      'varying vec2 vUv;',
-      'void main() {',
-      '  vec2 uv = 1.0 - vUv;',
-      '  gl_FragColor = texture2D(map, uv);',
-      '}',
-    ].join('\n'),
-    // The vertex shader
-    vert: [
-      'precision highp float;',
-      'attribute vec3 position;',
-      'attribute vec2 uv;',
-      'uniform mat4 projection;',
-      'uniform mat4 view;',
-      'varying vec2 vUv;',
-      'void main() {',
-      '  vUv = uv;',
-      '  gl_Position = projection * view * vec4(position.xyz, 1.0);',
-      '}'
-    ].join('\n'),
-    // The attributes of the mesh, position and uv (texture coordinate)
-    attributes: {
-      position: regl.buffer(sphere.positions),
-      uv: regl.buffer(sphere.uvs)
-    },
-    // The indices of the mesh
-    elements: regl.elements(sphere.cells)
-  });
+  let drawMesh;
 
-  var api = createLoop(render);
+  if (opt.mode === "cube") {
+    const faces = opt.images.map(img => getTextureParams(img));
+
+    cubeMap = regl.cube(...faces);
+
+    drawMesh = regl({
+      // The uniforms for this shader
+      uniforms: {
+        // Creates a GPU texture from our Image
+        envmap: cubeMap,
+        // Camera matrices will have to be passed into this mesh
+        projection: regl.prop("projection"),
+        view: regl.prop("view")
+      },
+      // The fragment shader
+      frag: `
+      // precision mediump float;
+      precision highp float;
+      uniform samplerCube envmap;
+      
+      // varying vec3 vUv;
+      varying vec3 vNorm;
+
+            
+      void main () {
+        gl_FragColor = textureCube(envmap, vNorm);
+      }
+  `,
+      vert: `
+      // precision mediump float;
+      precision highp float;
+    
+      attribute vec3 position;
+      
+      uniform mat4 projection;
+      uniform mat4 view;
+      
+      varying vec3 vNorm;
+
+      
+      void main() {
+        gl_Position = projection * view * vec4(position.xyz, 1.0);
+        vNorm = position;
+      }
+    `,
+      // The attributes of the mesh, position and uv (texture coordinate)
+      attributes: {
+        position: regl.buffer(cube.positions)
+      },
+      // The indices of the mesh
+      elements: regl.elements(cube.cells)
+    });
+  } else {
+    texture = regl.texture(getTextureParams(opt.image));
+    drawMesh = regl({
+      // The uniforms for this shader
+      uniforms: {
+        // Creates a GPU texture from our Image
+        map: texture,
+        // Camera matrices will have to be passed into this mesh
+        projection: regl.prop("projection"),
+        view: regl.prop("view")
+      },
+      // The fragment shader
+      frag: [
+        "precision highp float;",
+        "uniform sampler2D map;",
+        "uniform vec4 color;",
+        "varying vec2 vUv;",
+        "void main() {",
+        "  vec2 uv = 1.0 - vUv;",
+        "  gl_FragColor = texture2D(map, uv);",
+        "}"
+      ].join("\n"),
+      // The vertex shader
+      vert: [
+        "precision highp float;",
+        "attribute vec3 position;",
+        "attribute vec2 uv;",
+        "uniform mat4 projection;",
+        "uniform mat4 view;",
+        "varying vec2 vUv;",
+        "void main() {",
+        "  vUv = uv;",
+        "  gl_Position = projection * view * vec4(position.xyz, 1.0);",
+        "}"
+      ].join("\n"),
+      // The attributes of the mesh, position and uv (texture coordinate)
+      attributes: {
+        position: regl.buffer(sphere.positions),
+        uv: regl.buffer(sphere.uvs)
+      },
+      // The indices of the mesh
+      elements: regl.elements(sphere.cells)
+    });
+  }
+
+  let api = createLoop(render);
 
   api.clearColor = opt.clearColor || clearOpts.color;
   api.canvas = canvas;
@@ -109,7 +175,7 @@ function create360Viewer (opt) {
   api.destroy = destroy;
   api.render = render;
 
-  api.texture = function (opt) {
+  api.texture = function(opt) {
     texture(getTextureParams(opt));
   };
 
@@ -122,14 +188,18 @@ function create360Viewer (opt) {
 
   return api;
 
-  function getTextureParams (image) {
-    var defaults = {
-      min: 'linear',
-      mag: 'linear'
+  function getTextureParams(image) {
+    let defaults = {
+      min: "linear",
+      mag: "linear"
     };
-    if (image instanceof Image || image instanceof HTMLImageElement ||
-      image instanceof HTMLMediaElement || image instanceof HTMLVideoElement) {
-      var size = image.width * image.height;
+    if (
+      image instanceof Image ||
+      image instanceof HTMLImageElement ||
+      image instanceof HTMLMediaElement ||
+      image instanceof HTMLVideoElement
+    ) {
+      let size = image.width * image.height;
       return assign(defaults, {
         data: size > 0 ? image : null
       });
@@ -138,21 +208,21 @@ function create360Viewer (opt) {
     }
   }
 
-  function destroy () {
+  function destroy() {
     destroyed = true;
     api.stop();
     controls.disable();
     regl.destroy();
   }
 
-  function render () {
+  function render() {
     if (destroyed) return;
 
     // poll for GL changes
-    regl.poll()
+    regl.poll();
 
-    var width = gl.drawingBufferWidth;
-    var height = gl.drawingBufferHeight;
+    let width = gl.drawingBufferWidth;
+    let height = gl.drawingBufferHeight;
 
     // clear contents of the drawing buffer
     clearOpts.color = api.clearColor;
@@ -176,6 +246,8 @@ function create360Viewer (opt) {
     });
 
     // flush all pending webgl calls
-    gl.flush()
+    gl.flush();
   }
 }
+
+export default create360Viewer;
