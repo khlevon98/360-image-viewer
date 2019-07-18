@@ -18,7 +18,7 @@ function create360Viewer(opt) {
   let canvas = opt.canvas || document.createElement("canvas");
 
   if (!sphere) {
-    sphere = createCube(1, {
+    sphere = createSphere(1, {
       segments: 64
     });
   }
@@ -64,21 +64,20 @@ function create360Viewer(opt) {
 
   // allow HTMLImageElement or unspecified image
   let texture;
-  let cubeMap;
 
   // We create a new "mesh" that represents our 360 textured sphere
   let drawMesh;
 
   if (opt.mode === "cube") {
-    const faces = opt.images.map(img => getTextureParams(img));
+    const faces = opt.image.map(img => getTextureParams(img));
 
-    cubeMap = regl.cube(...faces);
+    texture = regl.cube(...faces);
 
     drawMesh = regl({
       // The uniforms for this shader
       uniforms: {
         // Creates a GPU texture from our Image
-        envmap: cubeMap,
+        envmap: texture,
         // Camera matrices will have to be passed into this mesh
         projection: regl.prop("projection"),
         view: regl.prop("view")
@@ -175,8 +174,13 @@ function create360Viewer(opt) {
   api.destroy = destroy;
   api.render = render;
 
-  api.texture = function(opt) {
-    texture(getTextureParams(opt));
+  api.texture = function(image) {
+    if (opt.mode === "cube") {
+      const faces = image.map(img => getTextureParams(img));
+      texture(...faces);
+    } else {
+      texture(getTextureParams(image));
+    }
   };
 
   api.controls = controls;
